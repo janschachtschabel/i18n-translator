@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 text-sm;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors;
+  }
+  .btn-primary {
+    @apply btn bg-blue-600 text-white hover:bg-blue-700;
+  }
+  .btn-secondary {
+    @apply btn bg-gray-200 text-gray-800 hover:bg-gray-300;
+  }
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-gray-600 hover:bg-gray-100;
+  }
+  .input {
+    @apply w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500;
+  }
+  .cell-missing {
+    @apply bg-red-50 border border-red-300;
+  }
+  .cell-ok {
+    @apply bg-white border border-gray-200;
+  }
+  .badge-missing {
+    @apply text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-medium;
+  }
+  .badge-ok {
+    @apply text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium;
+  }
+  .badge-warn {
+    @apply text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded-full font-medium;
+  }
+}

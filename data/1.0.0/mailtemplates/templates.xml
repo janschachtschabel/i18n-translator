@@ -1,0 +1,352 @@
+<templates>
+	<template name="header">
+		<message><![CDATA[
+			<div class="logo">
+			<img src="{{image:/images/logos/edu-sharing-mail.png}}">
+			</div>
+		]]>
+		</message>
+	</template>
+	<template name="stylesheet">
+		<style><![CDATA[
+			body{
+				padding:20px;
+				background:#f6f6f6;
+				font-size: 12px;
+				min-width: 300px;
+			}
+			.content{
+				max-width:500px;
+				margin:auto;
+				background:#fff;
+				box-shadow:0 2px 6px rgba(0,0,0,.5);
+				padding:20px;
+			}
+			.content img{
+				max-width: 100%;
+			}
+			.footer{
+				max-width:500px;
+				margin:auto;
+			}
+			h1,h2,h3,div,body{
+				font-family: Arial, sans-serif;
+				font-size:14px;
+			}
+			.logo{
+				text-align:center;
+			}
+			.logo img{
+				width:30%;
+				min-width:100px;
+				max-width:250px;
+				height:auto;
+				padding-bottom:20px;
+			}
+			h1{
+				color:#888;
+				font-size:20px;
+				font-weight:normal;
+				padding-bottom:15px;
+			}
+			h2{
+				font-size:14px;
+				font-weight:bold;
+				padding-bottom:5px;
+			}
+			p{
+				line-height: 20px;
+			}
+			.rights{
+				padding:10px 5px;
+				color:#666;
+				white-space:pre-line;
+				line-height: 175%;
+			}
+			.footer{
+				padding:30px 10px;
+			}
+			.btn{
+				margin:auto;
+				color:#fff;
+				text-decoration:none;
+				background-color:#48708e;
+				padding:10px 25px;
+				box-shadow:0 2px 5px rgba(0,0,0,.5);
+				display: inline-block;
+				width: 60%;
+			}
+			.input-field{
+				display:inline-block;
+				background:#fff;
+				border-radius:3px;
+				padding:5px 10px;
+				border:1px solid #ccc;
+			}
+			a{
+				color:#48708e;
+				text-decoration:none;
+			}
+			.center{
+				text-align:center;
+			}
+			@media only screen and (max-width: 400px)  {
+				body{
+					padding: 20px 0;
+				}
+				content{
+					width: 100%;
+				}
+
+			}
+		]]>
+		</style>
+	</template>
+	<template name="invited">
+		<subject>{{inviter.firstName}} {{inviter.lastName}} invited you to a material.</subject>
+		<message><![CDATA[
+			<h1>Hello {{firstName}} {{lastName}}</h1>
+			<h2>{{inviter.firstName}} {{inviter.lastName}} invited you to: "{{name}}".</h2>
+			Your access rights are:<br>
+			<div class="rights">{{permissions}}</div>
+			<br>
+			<div class="center"><a class="btn" href="{{link}}">Link to the material</a></div>
+			<br><br>
+			{{if message}}Message from {{inviter.firstName}} {{inviter.lastName}}:<br>
+				{{message}}
+			{{endif}}
+		]]>
+		</message>
+	</template>
+	<template name="invited_workflow">
+		<subject>{{assigner.firstName}} {{assigner.lastName}} has assigned you to a material.</subject>
+		<message><![CDATA[
+			<h1>Hello {{firstName}} {{lastName}}</h1>
+			<h2>{{assigner.firstName}} {{assigner.lastName}} has assigned "{{node.cm:name}}" with status "{{status}}" to you.</h2>
+			<br>
+			<div class="center"><a class="btn" href="{{link}}">Link to the material</a></div>
+			<br><br>
+			{{if comment}}Comment from user:<br>
+				{{comment}}
+			{{endif}}
+		]]>
+		</message>
+	</template>
+	<template name="invited_safe">
+		<subject>{{inviter.firstName}} {{inviter.lastName}} invited you to a material.</subject>
+		<message><![CDATA[
+			<h1>Hello {{firstName}} {{lastName}}</h1>
+			<h2>{{inviter.firstName}} {{inviter.lastName}} invited you to: "{{name}}".</h2>
+			Your access rights are:<br>
+			<div class="rights">{{permissions}}</div>
+			<br>
+			After logging into the safe area you will find the element at "shared with me".
+			<br><br>
+			{{if message}}Message from {{inviter.firstName}} {{inviter.lastName}}:<br>
+				{{message}}
+			{{endif}}
+		]]>
+		</message>
+	</template>
+	<template name="invited_collection">
+		<subject>{{inviter.firstName}} {{inviter.lastName}} invited you to a collection.</subject>
+		<message><![CDATA[
+			<h1>Hello {{firstName}} {{lastName}}</h1>
+			<h2>{{inviter.firstName}} {{inviter.lastName}} invited you to collection "{{name}}".</h2>
+			Your access rights are:<br>
+			<div class="rights">{{permissions}}</div>
+			<br>
+			<div class="center"><a class="btn" href="{{link}}">Link to collection</a></div>
+			<br><br>
+			{{if message}}Message from {{inviter.firstName}} {{inviter.lastName}}:<br>
+				{{message}}
+			{{endif}}
+		]]>
+		</message>
+	</template>
+	<template name="userRegister">
+		<subject>Account confirmation</subject>
+		<message><![CDATA[
+			<div class="center">
+				<h1>Hello {{firstName}} {{lastName}},</h1>
+				<p>Thank you for your registration!</p>
+				</p>
+					Copy the link below in the registration form to complete the registration:
+				<p>
+				</p>
+				<div class="center"><div class="input-field">{{key}}</div></div>
+				<br><br>
+				<p>Or click on the link below:</p>
+				<a class="btn" href="{{link}}">Finish registration</a>
+			</div>
+		]]>
+		</message>
+	</template>
+	<template name="userRecoverPassword">
+		<subject>Recover password</subject>
+		<message><![CDATA[
+			<div class="center">
+				<img src="{{image:/assets/images/register/register-mail.png}}">
+				<h1>Hello {{firstName}} {{lastName}},</h1>
+				<p>Did you forgot your password?
+				</p>
+				</p>
+					Click on the button below to recover your password
+				</p>
+				<a class="btn" href="{{link}}">Reset password</a>
+				<p>You can also copy the activation code below in the form:</p>
+				<div class="center"><div class="input-field">{{key}}</div></div>
+				<br>
+
+			</div>
+		]]>
+		</message>
+	</template>
+	<template name="userRegisterInformation">
+		<subject>New user registered</subject>
+		<message><![CDATA[
+			<div class="center">
+				<img src="{{image:/assets/images/register/new_user.png}}">
+				<h1>A new user has registered!</h1>
+				<p>
+				Name: {{firstName}} {{lastName}}
+				<br>E-Mail: <a href="mailto:{{email}}">{{email}}</a>
+				</p>
+				{{if organization}}
+					<p>Organization: {{organization}}</p>
+				{{endif}}
+				<a class="btn" href="{{link}}">Go to user management</a>
+			</div>
+		]]>
+		</message>
+	</template>
+	<template name="passwordRequest">
+		<subject>Password reset</subject>
+		<message><![CDATA[
+			<div class="center">
+				<h1>Hello {{firstName}} {{lastName}},</h1>
+				<p>If you forgot your password for logging into<a href="{{url}}"> {{url}} </a>.</p>
+				<p>Click on this link to assign a new password.</p>
+				<a class="btn" href="{{link}}">new password</a>
+				<p>
+					In case this email is not displayed correctly, please click » <a href="{{link}}">here</a>
+				</p>
+				<div class="input-field"><a href="{{link}}">{{link}}</a></div>
+				<br><br><br>
+				<p>Best regards, you {{LaSiDig Team}}</p>
+			</div>
+		]]>
+		</message>
+	</template>
+	<template name="nodeIssue">
+		<subject>{{reporterEmail}} reported a problem</subject>
+		<message><![CDATA[
+			<h1>Hallo!</h1>
+			<h2>{{reporterEmail}} has reported a problem with the material \"{{name}}\" ({{id}}).</h2>
+			Reason: {{reason}}<br><br><br>
+			{{if userComment}}additional information provided by the user:<br>
+				{{userComment}}
+				<br><br><br>
+			{{endif}}
+			<div class="center"><a class="btn" href="{{link}}">Link to the material in question</a></div>
+			<br><br>		
+		]]>
+		</message>
+	</template>
+	<template name="nodeIssueFeedback">
+		<subject>{{reporterEmail}} gave feedback</subject>
+		<message><![CDATA[
+			<h1>Hello!</h1>
+			<h2>{{reporterEmail}} has given feedback to material \"{{name}}\" ({{id}}).</h2>
+			{{if userComment}}additional information provided by the user:<br>
+				{{userComment}}
+				<br><br><br>
+			{{endif}}
+			<div class="center"><a class="btn" href="{{link}}">Link to the material in question</a></div>
+			<br><br>
+		]]>
+		</message>
+	</template>
+	<template name="userStatusChanged">
+		<subject>The status of your account has changed</subject>
+		<message><![CDATA[
+			<h1>Hello {{firstName}} {{lastName}}!</h1>
+			<h2>The status of your user account has changed</h2>
+			Old Status: {{oldStatus}}<br><br>
+			New Status: {{newStatus}}
+			<br><br><br>
+			Should this change not be in your interest, please immediately contact the provider of your system.
+		]]>
+		</message>
+	</template>
+	<template name="groupSignupList">
+		<subject>A user wants to join group "{{group}}"</subject>
+		<message><![CDATA[
+			<h1>Hello!</h1>
+			<h2>{{firstName}} {{lastName}} wants to join group "{{group}}".</h2>
+			<br>
+			Please go to the user management and manage the waiting list of your group.
+		]]>
+		</message>
+	</template>
+	<template name="groupSignupUser">
+		<subject>You joined group "{{group}}"</subject>
+		<message><![CDATA[
+			<h1>Hello {{firstName}} {{lastName}}!</h1>
+			<h2>You've successfully joined group "{{group}}".</h2>
+		]]>
+		</message>
+	</template>
+	<template name="groupSignupConfirmed">
+		<subject>You joined group "{{group}}"</subject>
+		<message><![CDATA[
+			<h1>Hello {{firstName}} {{lastName}}!</h1>
+			<h2>You're request to join group "{{group}}" has been accepted! You are now member of this group.</h2>
+		]]>
+		</message>
+	</template>
+	<template name="groupSignupRejected">
+		<subject>Could not join group "{{group}}"</subject>
+		<message><![CDATA[
+			<h1>Hello {{firstName}} {{lastName}}!</h1>
+			<h2>We're sorry to inform you that your request to join group "{{group}}" has been rejected by the group administrator.</h2>
+		]]>
+		</message>
+	</template>
+	<template name="groupSignupAdmin">
+		<subject>A new user joined group "{{group}}"</subject>
+		<message><![CDATA[
+			<h1>Hello!</h1>
+			<h2>{{firstName}} {{lastName}} just joined group "{{group}}".</h2>
+			<br>
+			You can manage the members of your group in the user management.
+		]]>
+		</message>
+	</template>
+	<template name="mdsValuespaceSuggestion">
+		<subject>A new metadata suggestion for {{widgetCaption}}</subject>
+		<message><![CDATA[
+			<h1>Hi!</h1>
+			<h2>{{firstName}} {{lastName}} has made a suggestion for a new valuespace entry:</h2>
+			<br>
+			Field: {{widgetCaption}} ({{widgetId}})<br>
+			Suggested Value: {{caption}} ({{id}})<br>
+			{{if parentId}}Parent Value: {{parentCaption}} ({{parentId}})<br>
+			{{endif}}
+			{{if link}}
+				<br><br>
+				Suggested for element "{{node.cm:name}}"
+				<br><br>
+				<div class="center"><a class="btn" href="{{link}}">Link to element</a></div>
+			{{endif}}
+		]]>
+		</message>
+	</template>
+	<template name="footer">
+		<message><![CDATA[
+			<a href="http://edu-sharing.com" style="float:left;">www.edu-sharing.com</a>
+			<a href="https://bildung.social/@edu_sharing" style="float:right;">@edusharing</a>
+		]]>
+		</message>
+	</template>
+</templates>
