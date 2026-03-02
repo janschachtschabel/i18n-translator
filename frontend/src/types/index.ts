@@ -71,6 +71,9 @@ export interface AppConfig {
   custom_areas: CustomArea[]
   lang_descriptions: Record<string, string>        // merged: defaults + custom overrides
   lang_descriptions_custom: Record<string, string> // only user-saved overrides
+  excluded_mds_groups: string[]
+  excluded_json_categories: string[]
+  variant_filters: Record<string, string>
 }
 
 export interface AiFillResult {

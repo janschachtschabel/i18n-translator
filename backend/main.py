@@ -67,6 +67,9 @@ class ConfigPayload(BaseModel):
     b_api_key: Optional[str] = None
     custom_areas: Optional[List[Dict]] = None
     lang_descriptions: Optional[Dict[str, str]] = None
+    excluded_mds_groups: Optional[List[str]] = None
+    excluded_json_categories: Optional[List[str]] = None
+    variant_filters: Optional[Dict[str, str]] = None
 
 class AddLanguageRequest(BaseModel):
     area: str
@@ -454,6 +457,54 @@ def save_json(payload: SaveJsonPayload):
     path.write_text(json.dumps(nested, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True}
 
+class DeleteKeyPayload(BaseModel):
+    category: str
+    key: str
+
+class InsertKeyPayload(BaseModel):
+    category: str
+    key: str
+    after_key: Optional[str] = None  # insert after this key; None = append
+
+@app.delete("/api/json/key")
+def delete_json_key(payload: DeleteKeyPayload):
+    cat_dir = JSON_DIR / payload.category
+    if not cat_dir.exists():
+        raise HTTPException(404, "Category not found")
+    for f in cat_dir.glob("*.json"):
+        try:
+            flat = flatten_json(json.loads(read_smart(f)))
+            if payload.key in flat:
+                del flat[payload.key]
+                f.write_text(json.dumps(unflatten_json(flat), ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+    return {"ok": True}
+
+@app.post("/api/json/key")
+def insert_json_key(payload: InsertKeyPayload):
+    cat_dir = JSON_DIR / payload.category
+    if not cat_dir.exists():
+        raise HTTPException(404, "Category not found")
+    for f in cat_dir.glob("*.json"):
+        try:
+            flat = flatten_json(json.loads(read_smart(f)))
+            if payload.key in flat:
+                continue  # key already exists, skip
+            if payload.after_key and payload.after_key in flat:
+                # Rebuild dict inserting the new key after after_key
+                new_flat: Dict[str, str] = {}
+                for k, v in flat.items():
+                    new_flat[k] = v
+                    if k == payload.after_key:
+                        new_flat[payload.key] = ""
+            else:
+                new_flat = {**flat, payload.key: ""}
+            f.write_text(json.dumps(unflatten_json(new_flat), ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+    return {"ok": True}
+
 @app.post("/api/json/add-language")
 def add_json_language(req: AddLanguageRequest):
     cats = json_categories()
@@ -495,6 +546,46 @@ def get_mail():
 @app.put("/api/mail/save")
 def save_mail(payload: SaveMailPayload):
     save_mail_file(payload.lang, payload.templates)
+    return {"ok": True}
+
+class DeleteMailTemplatePayload(BaseModel):
+    name: str
+
+class InsertMailTemplatePayload(BaseModel):
+    name: str
+    has_subject: bool = False
+
+@app.delete("/api/mail/template")
+def delete_mail_template(payload: DeleteMailTemplatePayload):
+    for f in MAIL_DIR.glob("*.xml"):
+        try:
+            data = load_mail_file(f)
+            if payload.name in data:
+                del data[payload.name]
+                save_mail_file(
+                    "default" if f.name == "templates.xml" else f.stem.replace("templates_", ""),
+                    data
+                )
+        except Exception:
+            pass
+    return {"ok": True}
+
+@app.post("/api/mail/template")
+def insert_mail_template(payload: InsertMailTemplatePayload):
+    for f in MAIL_DIR.glob("*.xml"):
+        try:
+            data = load_mail_file(f)
+            if payload.name not in data:
+                entry: Dict[str, str] = {"message": ""}
+                if payload.has_subject:
+                    entry["subject"] = ""
+                data[payload.name] = entry
+                save_mail_file(
+                    "default" if f.name == "templates.xml" else f.stem.replace("templates_", ""),
+                    data
+                )
+        except Exception:
+            pass
     return {"ok": True}
 
 @app.post("/api/mail/add-language")
@@ -547,6 +638,77 @@ def save_mds(payload: SaveMdsPayload):
     path.write_text(serialize_properties(payload.translations, original), encoding="utf-8")
     return {"ok": True}
 
+def _prop_line_key(line: str) -> Optional[str]:
+    s = line.strip()
+    if not s or s.startswith('#') or s.startswith('!'):
+        return None
+    for sep in (':', '='):
+        if sep in s:
+            return s[:s.index(sep)].strip()
+    return None
+
+def mds_files_for_group(group: str) -> List[Path]:
+    files: List[Path] = []
+    base = MDS_I18N_DIR / f"{group}.properties"
+    if base.exists():
+        files.append(base)
+    pattern = re.compile(rf"^{re.escape(group)}_([a-z]{{2}}_[A-Z]{{2}})\.properties$")
+    for f in sorted(MDS_I18N_DIR.glob("*.properties")):
+        if pattern.match(f.name):
+            files.append(f)
+    return files
+
+class DeleteMdsKeyPayload(BaseModel):
+    group: str
+    key: str
+
+class InsertMdsKeyPayload(BaseModel):
+    group: str
+    key: str
+    after_key: Optional[str] = None
+
+@app.delete("/api/mds/key")
+def delete_mds_key(payload: DeleteMdsKeyPayload):
+    for f in mds_files_for_group(payload.group):
+        try:
+            content = read_smart(f)
+            new_content = ''.join(
+                line for line in content.splitlines(keepends=True)
+                if _prop_line_key(line) != payload.key
+            )
+            f.write_text(new_content, encoding="utf-8")
+        except Exception:
+            pass
+    return {"ok": True}
+
+@app.post("/api/mds/key")
+def insert_mds_key(payload: InsertMdsKeyPayload):
+    new_line = f"{payload.key}: \n"
+    for f in mds_files_for_group(payload.group):
+        try:
+            content = read_smart(f)
+            # Skip if key already exists
+            if any(_prop_line_key(l) == payload.key for l in content.splitlines(keepends=True)):
+                continue
+            if payload.after_key:
+                lines = content.splitlines(keepends=True)
+                result: List[str] = []
+                inserted = False
+                for line in lines:
+                    result.append(line)
+                    if not inserted and _prop_line_key(line) == payload.after_key:
+                        result.append(new_line)
+                        inserted = True
+                if not inserted:
+                    result.append(new_line)
+                new_content = ''.join(result)
+            else:
+                new_content = content.rstrip('\n') + '\n' + new_line
+            f.write_text(new_content, encoding="utf-8")
+        except Exception:
+            pass
+    return {"ok": True}
+
 @app.post("/api/mds/add-language")
 def add_mds_language(req: AddLanguageRequest):
     all_groups = mds_groups()
@@ -574,6 +736,9 @@ def get_config_endpoint():
         "custom_areas": cfg.get("custom_areas", []),
         "lang_descriptions": merged_descs,
         "lang_descriptions_custom": cfg.get("lang_descriptions", {}),
+        "excluded_mds_groups": cfg.get("excluded_mds_groups", []),
+        "excluded_json_categories": cfg.get("excluded_json_categories", []),
+        "variant_filters": cfg.get("variant_filters", {}),
     }
 
 @app.post("/api/config")
@@ -585,6 +750,12 @@ def set_config_endpoint(payload: ConfigPayload):
         cfg["custom_areas"] = payload.custom_areas
     if payload.lang_descriptions is not None:
         cfg["lang_descriptions"] = payload.lang_descriptions
+    if payload.excluded_mds_groups is not None:
+        cfg["excluded_mds_groups"] = payload.excluded_mds_groups
+    if payload.excluded_json_categories is not None:
+        cfg["excluded_json_categories"] = payload.excluded_json_categories
+    if payload.variant_filters is not None:
+        cfg["variant_filters"] = payload.variant_filters
     save_config(cfg)
     return {"ok": True}
 

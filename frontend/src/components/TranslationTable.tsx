@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback } from 'react'
-import { Wand2, ChevronDown, ChevronUp, AlertTriangle, ArrowUpDown, AlignJustify } from 'lucide-react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { Wand2, ChevronDown, ChevronUp, AlertTriangle, ArrowUpDown, AlignJustify, Trash2, Plus, SlidersHorizontal, X, Equal } from 'lucide-react'
 import { aiTranslate } from '../api'
 import type { TranslationEntry, SortOrder } from '../types'
 
@@ -15,14 +15,29 @@ interface Props {
   onSortChange?: (s: SortOrder) => void
   onSave: (lang: string, key: string, value: string) => void
   isSaving?: boolean
+  variantFilters?: Record<string, string>
+  onDeleteKey?: (key: string) => void
+  onInsertAfterKey?: (key: string) => void
 }
 
 const DEFAULT_COL_WIDTH = 220
 const MIN_COL_WIDTH = 100
-const MAX_COL_WIDTH = 300
+const MAX_COL_WIDTH = 800
 
 function isMissing(v: string) {
   return !v || !v.trim()
+}
+
+function isEffectivelyMissing(
+  val: string,
+  lang: string,
+  refVal: string,
+  variantFilters: Record<string, string>
+): boolean {
+  if (!isMissing(val)) return false
+  const pattern = variantFilters[lang]
+  if (!pattern) return true
+  try { return new RegExp(pattern).test(refVal) } catch { return true }
 }
 
 function getTemplateVars(s: string): string[] {
@@ -65,6 +80,8 @@ function CellEditor({
     }
   }
 
+  const sameAsRef = !missing && value.trim() !== '' && value === refValue && lang !== referenceLang
+
   const refVars = getTemplateVars(refValue)
   const draftVars = getTemplateVars(draft)
   const varMismatch =
@@ -77,7 +94,7 @@ function CellEditor({
       <div
         className={`group relative min-h-[2rem] px-2 py-1 rounded text-xs ${
           missing ? 'bg-red-50 border border-red-300' : 'bg-white border border-gray-200'
-        } ${varMismatch ? 'border-yellow-400 bg-yellow-50' : ''}`}
+        } ${varMismatch ? 'border-yellow-400 bg-yellow-50' : ''} ${sameAsRef && !varMismatch ? 'border-orange-200 bg-orange-50/30' : ''}`}
         onClick={() => { setDraft(value); setEditing(true) }}
         style={{ cursor: 'text' }}
       >
@@ -97,6 +114,14 @@ function CellEditor({
             ].filter(Boolean).join(' · ')}
           >
             <AlertTriangle size={11} className="text-yellow-500" />
+          </span>
+        )}
+        {sameAsRef && (
+          <span
+            className="inline-flex items-center gap-0.5 ml-1 cursor-help"
+            title={`Value is identical to ${referenceLang} — possibly not translated`}
+          >
+            <Equal size={11} className="text-orange-400" />
           </span>
         )}
         <div className="absolute right-1 top-1 hidden group-hover:flex gap-1">
@@ -183,16 +208,34 @@ export default function TranslationTable({
   filter = '',
   showMissingOnly = false,
   showErrorsOnly = false,
-  sortOrder = 'file',
+  sortOrder = 'alpha',
   onSortChange,
   onSave,
   isSaving,
+  variantFilters = {},
+  onDeleteKey,
+  onInsertAfterKey,
 }: Props) {
   const displayLangs = visibleLangs && visibleLangs.length > 0 ? visibleLangs : languages
   const [colWidths, setColWidths] = useState<Record<string, number>>(() =>
     Object.fromEntries(displayLangs.map(l => [l, DEFAULT_COL_WIDTH]))
   )
+  const containerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ lang: string; startX: number; startW: number } | null>(null)
+
+  const KEY_COL_W = 220
+  const [colFilters, setColFilters] = useState<Record<string, string>>({})
+  const [showColFilters, setShowColFilters] = useState(false)
+  const [showSameAsRefOnly, setShowSameAsRefOnly] = useState(false)
+
+  useEffect(() => {
+    const containerW = containerRef.current?.clientWidth ?? 0
+    const availW = containerW > KEY_COL_W + MIN_COL_WIDTH * displayLangs.length
+      ? containerW - KEY_COL_W
+      : DEFAULT_COL_WIDTH * displayLangs.length
+    const equalW = Math.max(MIN_COL_WIDTH, Math.floor(availW / Math.max(1, displayLangs.length)))
+    setColWidths(Object.fromEntries(displayLangs.map(l => [l, equalW])))
+  }, [displayLangs.join(',')])
 
   const startResize = useCallback((lang: string, e: React.MouseEvent) => {
     e.preventDefault()
@@ -213,15 +256,33 @@ export default function TranslationTable({
     document.addEventListener('mouseup', onUp)
   }, [colWidths])
 
+  const HIDDEN_KEYS = ['this_is_a_bug_the_first_line_will_not_be_translated']
   const filtered = entries.filter(e => {
+    if (HIDDEN_KEYS.includes(e.key)) return false
     if (filter) {
       const lf = filter.toLowerCase()
       const keyMatch = e.key.toLowerCase().includes(lf)
       const valMatch = Object.values(e.translations).some(v => v.toLowerCase().includes(lf))
       if (!keyMatch && !valMatch) return false
     }
+    for (const [lang, cf] of Object.entries(colFilters)) {
+      if (!cf) continue
+      const val = (lang === '__key__' ? e.key : (e.translations[lang] ?? '')).toLowerCase()
+      if (cf === '!') { if (val.trim()) return false }
+      else if (cf.startsWith('!')) { if (val.includes(cf.slice(1).toLowerCase())) return false }
+      else { if (!val.includes(cf.toLowerCase())) return false }
+    }
     if (showMissingOnly) {
-      if (!displayLangs.some(l => isMissing(e.translations[l] ?? ''))) return false
+      const refV = e.translations[referenceLang] ?? ''
+      if (!displayLangs.some(l => isEffectivelyMissing(e.translations[l] ?? '', l, refV, variantFilters))) return false
+    }
+    if (showSameAsRefOnly) {
+      const refV = e.translations[referenceLang] ?? ''
+      if (!refV.trim()) return false
+      const hasSameAsRef = displayLangs.some(l =>
+        l !== referenceLang && (e.translations[l] ?? '') === refV && (e.translations[l] ?? '').trim() !== ''
+      )
+      if (!hasSameAsRef) return false
     }
     if (showErrorsOnly) {
       const refVal = e.translations[referenceLang] ?? ''
@@ -246,10 +307,8 @@ export default function TranslationTable({
     )
   }
 
-  const KEY_COL_W = 220
-
   return (
-    <div className="overflow-auto h-full">
+    <div className="overflow-auto h-full" ref={containerRef}>
       {isSaving && (
         <div className="fixed top-4 right-4 z-50 bg-blue-600 text-white text-xs px-3 py-1.5 rounded shadow">
           Saving…
@@ -276,11 +335,40 @@ export default function TranslationTable({
                       : <ArrowUpDown size={11} className="text-blue-600" />}
                   </button>
                 )}
+                <button
+                  onClick={() => { setShowColFilters(v => !v); if (showColFilters) setColFilters({}) }}
+                  className={`p-0.5 rounded hover:bg-gray-200 ${showColFilters || Object.values(colFilters).some(Boolean) ? 'text-blue-600' : 'text-gray-400'}`}
+                  title="Toggle per-column filters"
+                >
+                  <SlidersHorizontal size={11} />
+                </button>
+                <button
+                  onClick={() => setShowSameAsRefOnly(v => !v)}
+                  className={`p-0.5 rounded hover:bg-gray-200 ${showSameAsRefOnly ? 'text-orange-500' : 'text-gray-400'}`}
+                  title="Show only rows with possibly untranslated values (= reference)"
+                >
+                  <Equal size={11} />
+                </button>
               </div>
+              {showColFilters && (
+                <input
+                  className="mt-1 w-full input text-xs py-0.5 font-mono"
+                  placeholder="key filter…"
+                  value={colFilters['__key__'] ?? ''}
+                  onChange={e => setColFilters(prev => ({ ...prev, '__key__': e.target.value }))}
+                />
+              )}
             </th>
             {displayLangs.map(lang => {
               const w = colWidths[lang] ?? DEFAULT_COL_WIDTH
-              const missingCount = entries.filter(e => isMissing(e.translations[lang] ?? '')).length
+              const missingCount = entries.filter(e => isEffectivelyMissing(e.translations[lang] ?? '', lang, e.translations[referenceLang] ?? '', variantFilters)).length
+              const sameAsRefCount = lang !== referenceLang
+                ? entries.filter(e => {
+                    const refV = e.translations[referenceLang] ?? ''
+                    const v = e.translations[lang] ?? ''
+                    return v.trim() !== '' && v === refV
+                  }).length
+                : 0
               return (
                 <th
                   key={lang}
@@ -295,7 +383,27 @@ export default function TranslationTable({
                     {missingCount > 0 && (
                       <span className="badge-missing flex-shrink-0">{missingCount}</span>
                     )}
+                    {sameAsRefCount > 0 && (
+                      <span className="flex-shrink-0 inline-flex items-center gap-0.5 text-xs bg-orange-50 text-orange-500 border border-orange-200 px-1 rounded" title="Values identical to reference (possibly untranslated)">
+                        <Equal size={9} />{sameAsRefCount}
+                      </span>
+                    )}
                   </div>
+                  {showColFilters && (
+                    <div className="relative mt-1">
+                      <input
+                        className="w-full input text-xs py-0.5 font-mono pr-5"
+                        placeholder="filter…"
+                        value={colFilters[lang] ?? ''}
+                        onChange={e => setColFilters(prev => ({ ...prev, [lang]: e.target.value }))}
+                      />
+                      {colFilters[lang] && (
+                        <button className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" onClick={() => setColFilters(prev => { const n = { ...prev }; delete n[lang]; return n })}>
+                          <X size={9} />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {/* Resize handle */}
                   <div
                     className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-400 active:bg-blue-600 opacity-40 hover:opacity-100 transition-opacity"
@@ -309,7 +417,7 @@ export default function TranslationTable({
         <tbody>
           {filtered.map((entry, i) => {
             const refValue = entry.translations[referenceLang] ?? ''
-            const rowMissing = displayLangs.some(l => isMissing(entry.translations[l] ?? ''))
+            const rowMissing = displayLangs.some(l => isEffectivelyMissing(entry.translations[l] ?? '', l, refValue, variantFilters))
             return (
               <tr
                 key={entry.key}
@@ -319,16 +427,38 @@ export default function TranslationTable({
               >
                 {/* Sticky key cell */}
                 <td
-                  className="px-3 py-1.5 align-top sticky left-0 z-10 border-r border-gray-100"
-                  style={{ width: KEY_COL_W, backgroundColor: rowMissing ? 'rgb(254 242 242 / 0.5)' : (i % 2 === 0 ? 'white' : 'rgb(249 250 251 / 0.5)') }}
+                  className="px-3 py-1.5 align-top sticky left-0 z-10 border-r border-gray-100 group/key"
+                  style={{ width: KEY_COL_W, minWidth: KEY_COL_W, background: rowMissing ? '#fff5f5' : i % 2 === 0 ? 'white' : '#f9fafb' }}
                 >
-                  <div className="font-mono text-gray-600 text-xs break-all leading-relaxed">
-                    {entry.key}
+                  <div className="flex items-start gap-1">
+                    <span className="font-mono text-gray-600 text-xs break-all leading-relaxed flex-1">{entry.key}</span>
+                    {(onDeleteKey || onInsertAfterKey) && (
+                      <div className="flex-shrink-0 flex flex-col gap-0.5 opacity-0 group-hover/key:opacity-100 transition-opacity">
+                        {onInsertAfterKey && (
+                          <button
+                            title="Insert key after this one"
+                            onClick={() => onInsertAfterKey(entry.key)}
+                            className="p-0.5 rounded hover:bg-blue-100 text-blue-400 hover:text-blue-600"
+                          >
+                            <Plus size={10} />
+                          </button>
+                        )}
+                        {onDeleteKey && (
+                          <button
+                            title="Delete this key from all languages"
+                            onClick={() => onDeleteKey(entry.key)}
+                            className="p-0.5 rounded hover:bg-red-100 text-red-300 hover:text-red-500"
+                          >
+                            <Trash2 size={10} />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </td>
                 {displayLangs.map(lang => {
                   const val = entry.translations[lang] ?? ''
-                  const missing = isMissing(val)
+                  const missing = isEffectivelyMissing(val, lang, refValue, variantFilters)
                   const w = colWidths[lang] ?? DEFAULT_COL_WIDTH
                   return (
                     <td key={lang} className="px-2 py-1.5 align-top" style={{ width: w, maxWidth: MAX_COL_WIDTH }}>

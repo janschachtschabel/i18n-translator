@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Search, Filter, Plus, Download, RefreshCw, Eye, EyeOff, Wand2, ArrowUpDown, AlertTriangle } from 'lucide-react'
-import { fetchJsonCategories, fetchJsonCategory, saveJsonLang, addJsonLanguage, downloadArea, aiFillEmpty } from '../api'
+import { fetchJsonCategories, fetchJsonCategory, saveJsonLang, addJsonLanguage, downloadArea, aiFillEmpty, fetchAppConfig, deleteJsonKey, insertJsonKey } from '../api'
 import type { AppSettings, SortOrder } from '../types'
 import TranslationTable from './TranslationTable'
 import AiFillPanel from './AiFillPanel'
@@ -27,15 +27,25 @@ export default function JsonView({ settings, onStatsChange }: Props) {
   const [showErrorsOnly, setShowErrorsOnly] = useState(false)
   const [fillingLang, setFillingLang] = useState<string | null>(null)
   const [fillError, setFillError] = useState('')
+  const [insertAfterKey, setInsertAfterKey] = useState<string | null>(null)
+  const [newKeyInput, setNewKeyInput] = useState('')
 
   const { data: categories = [] } = useQuery({
     queryKey: ['json-categories'],
     queryFn: fetchJsonCategories,
   })
 
+  const { data: appConfig } = useQuery({
+    queryKey: ['app-config'],
+    queryFn: fetchAppConfig,
+  })
+
+  const excludedCats = appConfig?.excluded_json_categories ?? []
+  const visibleCategories = (categories as string[]).filter(c => !excludedCats.includes(c))
+
   useEffect(() => {
-    if (!category && categories.length) setCategory((categories as string[])[0])
-  }, [categories, category])
+    if (!category && visibleCategories.length) setCategory(visibleCategories[0])
+  }, [visibleCategories, category])
 
   const { data: catData, isLoading } = useQuery({
     queryKey: ['json-category', category, sortOrder, settings.referenceLang],
@@ -52,6 +62,36 @@ export default function JsonView({ settings, onStatsChange }: Props) {
       onStatsChange()
     },
   })
+
+  const deleteKeyMutation = useMutation({
+    mutationFn: (key: string) => deleteJsonKey(category, key),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['json-category', category] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      onStatsChange()
+    },
+  })
+
+  const insertKeyMutation = useMutation({
+    mutationFn: ({ key, afterKey }: { key: string; afterKey?: string }) => insertJsonKey(category, key, afterKey),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['json-category', category] })
+      setInsertAfterKey(null)
+      setNewKeyInput('')
+    },
+  })
+
+  const handleInsertAfterKey = (key: string) => {
+    const dotIdx = key.lastIndexOf('.')
+    const prefix = dotIdx > 0 ? key.slice(0, dotIdx + 1) : ''
+    setNewKeyInput(prefix)
+    setInsertAfterKey(key)
+  }
+
+  const handleInsertSubmit = () => {
+    if (!newKeyInput.trim()) return
+    insertKeyMutation.mutate({ key: newKeyInput.trim(), afterKey: insertAfterKey ?? undefined })
+  }
 
   const addLangMutation = useMutation({
     mutationFn: ({ lang, description }: { lang: string; description: string }) =>
@@ -127,7 +167,7 @@ export default function JsonView({ settings, onStatsChange }: Props) {
 
         {/* Category selector */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          {(categories as string[]).map((cat: string) => (
+          {visibleCategories.map((cat: string) => (
             <button
               key={cat}
               onClick={() => setCategory(cat)}
@@ -206,6 +246,16 @@ export default function JsonView({ settings, onStatsChange }: Props) {
           >
             <ArrowUpDown size={12} />
             {sortOrder === 'alpha' ? 'A–Z' : 'File order'}
+          </button>
+        </Tooltip>
+
+        {/* New key */}
+        <Tooltip text="Add a new key (appended at end of category)" side="bottom">
+          <button
+            onClick={() => { setNewKeyInput(''); setInsertAfterKey('') }}
+            className="btn-secondary text-xs py-1"
+          >
+            <Plus size={12} /> Key
           </button>
         </Tooltip>
 
@@ -318,9 +368,45 @@ export default function JsonView({ settings, onStatsChange }: Props) {
             onSortChange={setSortOrder}
             onSave={handleCellSave}
             isSaving={saveMutation.isPending}
+            variantFilters={appConfig?.variant_filters ?? {}}
+            onDeleteKey={key => { if (window.confirm(`Delete key "${key}" from all languages?`)) deleteKeyMutation.mutate(key) }}
+            onInsertAfterKey={handleInsertAfterKey}
           />
         ) : null}
       </div>
+
+      {/* Insert key modal */}
+      {insertAfterKey !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setInsertAfterKey(null)}>
+          <div className="bg-white rounded-xl shadow-xl p-5 w-96 space-y-3" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-gray-800 text-sm">Insert new key</h3>
+            <p className="text-xs text-gray-500">
+              {insertAfterKey
+                ? <>After: <code className="bg-gray-100 px-1 rounded">{insertAfterKey}</code></>
+                : <span className="italic">Append to end of category</span>}
+            </p>
+            <input
+              autoFocus
+              className="input w-full text-xs font-mono py-1"
+              placeholder="new.key.name"
+              value={newKeyInput}
+              onChange={e => setNewKeyInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleInsertSubmit(); if (e.key === 'Escape') setInsertAfterKey(null) }}
+            />
+            <div className="flex gap-2 justify-end">
+              <button className="btn-ghost text-xs py-1" onClick={() => setInsertAfterKey(null)}>Cancel</button>
+              <button
+                className="btn-primary text-xs py-1"
+                onClick={handleInsertSubmit}
+                disabled={!newKeyInput.trim() || insertKeyMutation.isPending}
+              >
+                {insertKeyMutation.isPending ? <RefreshCw size={12} className="animate-spin" /> : <Plus size={12} />}
+                Insert
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
 
       {/* AI Panel */}

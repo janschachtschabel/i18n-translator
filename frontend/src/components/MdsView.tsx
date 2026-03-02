@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Search, Filter, Plus, Download, RefreshCw, Eye, EyeOff, Wand2, ArrowUpDown, AlertTriangle } from 'lucide-react'
-import { fetchMdsGroups, fetchMdsGroup, saveMdsGroup, addMdsLanguage, downloadArea, aiFillEmpty } from '../api'
+import { fetchMdsGroups, fetchMdsGroup, saveMdsGroup, addMdsLanguage, downloadArea, aiFillEmpty, fetchAppConfig, deleteMdsKey, insertMdsKey } from '../api'
 import type { AppSettings, SortOrder } from '../types'
 import TranslationTable from './TranslationTable'
 import AiFillPanel from './AiFillPanel'
@@ -26,18 +26,30 @@ export default function MdsView({ settings, onStatsChange }: Props) {
   const [showErrorsOnly, setShowErrorsOnly] = useState(false)
   const [fillingLang, setFillingLang] = useState<string | null>(null)
   const [fillError, setFillError] = useState('')
+  const [insertAfterKey, setInsertAfterKey] = useState<string | null>(null)
+  const [newKeyInput, setNewKeyInput] = useState('')
 
   const { data: groups = {} } = useQuery({
     queryKey: ['mds-groups'],
     queryFn: fetchMdsGroups,
   })
 
+  const { data: appConfig } = useQuery({
+    queryKey: ['app-config'],
+    queryFn: fetchAppConfig,
+  })
+
+  const excluded = appConfig?.excluded_mds_groups ?? []
+  const visibleGroups = Object.fromEntries(
+    Object.entries(groups).filter(([g]) => !excluded.includes(g))
+  )
+
   useEffect(() => {
     if (!group) {
-      const first = Object.keys(groups)[0]
+      const first = Object.keys(visibleGroups)[0]
       if (first) setGroup(first)
     }
-  }, [groups, group])
+  }, [visibleGroups, group])
 
   const { data: groupData, isLoading } = useQuery({
     queryKey: ['mds-group', group, sortOrder],
@@ -54,6 +66,36 @@ export default function MdsView({ settings, onStatsChange }: Props) {
       onStatsChange()
     },
   })
+
+  const deleteKeyMutation = useMutation({
+    mutationFn: (key: string) => deleteMdsKey(group, key),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mds-group', group] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      onStatsChange()
+    },
+  })
+
+  const insertKeyMutation = useMutation({
+    mutationFn: ({ key, afterKey }: { key: string; afterKey?: string }) => insertMdsKey(group, key, afterKey),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mds-group', group] })
+      setInsertAfterKey(null)
+      setNewKeyInput('')
+    },
+  })
+
+  const handleInsertAfterKey = (key: string) => {
+    const dotIdx = key.lastIndexOf('.')
+    const prefix = dotIdx > 0 ? key.slice(0, dotIdx + 1) : ''
+    setNewKeyInput(prefix)
+    setInsertAfterKey(key)
+  }
+
+  const handleInsertSubmit = () => {
+    if (!newKeyInput.trim()) return
+    insertKeyMutation.mutate({ key: newKeyInput.trim(), afterKey: insertAfterKey || undefined })
+  }
 
   const addLangMutation = useMutation({
     mutationFn: ({ lang, description }: { lang: string; description: string }) =>
@@ -106,7 +148,6 @@ export default function MdsView({ settings, onStatsChange }: Props) {
     return groupData.languages.filter((l: string) => !hiddenLangs.includes(l))
   }, [groupData, hiddenLangs])
 
-  const groupNames = Object.keys(groups)
 
   return (
     <div className="flex h-full min-h-0">
@@ -117,7 +158,7 @@ export default function MdsView({ settings, onStatsChange }: Props) {
 
         {/* Group selector */}
         <div className="flex items-center gap-1 flex-wrap">
-          {groupNames.map(g => (
+          {Object.keys(visibleGroups).map(g => (
             <button
               key={g}
               onClick={() => setGroup(g)}
@@ -193,6 +234,15 @@ export default function MdsView({ settings, onStatsChange }: Props) {
           >
             <ArrowUpDown size={12} />
             {sortOrder === 'alpha' ? 'A–Z' : 'File order'}
+          </button>
+        </Tooltip>
+
+        <Tooltip text="Add a new key (appended at end of group)" side="bottom">
+          <button
+            onClick={() => { setNewKeyInput(''); setInsertAfterKey('') }}
+            className="btn-secondary text-xs py-1"
+          >
+            <Plus size={12} /> Key
           </button>
         </Tooltip>
 
@@ -297,9 +347,45 @@ export default function MdsView({ settings, onStatsChange }: Props) {
             onSortChange={setSortOrder}
             onSave={handleCellSave}
             isSaving={saveMutation.isPending}
+            variantFilters={appConfig?.variant_filters ?? {}}
+            onDeleteKey={key => { if (window.confirm(`Delete key "${key}" from all languages?`)) deleteKeyMutation.mutate(key) }}
+            onInsertAfterKey={handleInsertAfterKey}
           />
         ) : null}
       </div>
+
+      {/* Insert key modal */}
+      {insertAfterKey !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setInsertAfterKey(null)}>
+          <div className="bg-white rounded-xl shadow-xl p-5 w-96 space-y-3" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-gray-800 text-sm">Insert new key</h3>
+            <p className="text-xs text-gray-500">
+              {insertAfterKey
+                ? <>After: <code className="bg-gray-100 px-1 rounded">{insertAfterKey}</code></>
+                : <span className="italic">Append to end of group</span>}
+            </p>
+            <input
+              autoFocus
+              className="input w-full text-xs font-mono py-1"
+              placeholder="new.key.name"
+              value={newKeyInput}
+              onChange={e => setNewKeyInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleInsertSubmit(); if (e.key === 'Escape') setInsertAfterKey(null) }}
+            />
+            <div className="flex gap-2 justify-end">
+              <button className="btn-ghost text-xs py-1" onClick={() => setInsertAfterKey(null)}>Cancel</button>
+              <button
+                className="btn-primary text-xs py-1"
+                onClick={handleInsertSubmit}
+                disabled={!newKeyInput.trim() || insertKeyMutation.isPending}
+              >
+                {insertKeyMutation.isPending ? <RefreshCw size={12} className="animate-spin" /> : <Plus size={12} />}
+                Insert
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
 
       {/* AI Panel */}
