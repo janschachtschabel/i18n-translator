@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Settings, Archive, Download, Key, CheckCircle, AlertTriangle, Plus, Trash2, RefreshCw } from 'lucide-react'
-import { fetchBackups, createBackup, downloadAll, downloadArea, fetchAppConfig, saveAppConfig } from '../api'
+import { fetchBackups, createBackup, downloadAll, downloadArea, fetchAppConfig, saveAppConfig, fetchMdsGroups, fetchJsonCategories } from '../api'
 import type { AppSettings, CustomArea, AppConfig } from '../types'
 
 interface Props {
@@ -100,6 +100,165 @@ function LangDescriptions({
         {saved && <span className="text-green-600 text-xs">Saved!</span>}
         <span className="text-gray-400 text-xs ml-auto">Blue = custom override · Gray = built-in default</span>
       </div>
+    </div>
+  )
+}
+
+function VariantFiltersPanel({
+  appConfig,
+  onSave,
+}: {
+  appConfig: AppConfig | undefined
+  onSave: (patch: Record<string, unknown>) => void
+}) {
+  const filters = appConfig?.variant_filters ?? {}
+  const [newLang, setNewLang] = useState('')
+  const [newPattern, setNewPattern] = useState('')
+
+  const update = (lang: string, pattern: string) => {
+    const next = { ...filters, [lang]: pattern }
+    if (!pattern.trim()) delete next[lang]
+    onSave({ variant_filters: next })
+  }
+  const remove = (lang: string) => {
+    const next = { ...filters }
+    delete next[lang]
+    onSave({ variant_filters: next })
+  }
+  const add = () => {
+    if (!newLang.trim() || !newPattern.trim()) return
+    onSave({ variant_filters: { ...filters, [newLang.trim()]: newPattern.trim() } })
+    setNewLang('')
+    setNewPattern('')
+  }
+
+  if (!appConfig) return <p className="text-xs text-gray-400">Loading…</p>
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-gray-500">
+        For variant languages (e.g. <code className="bg-gray-100 px-1 rounded">de-no-binnen-i</code>), an entry is only
+        flagged as <em>missing</em> when the reference value matches the regexp.
+        Example: <code className="bg-gray-100 px-1 rounded">{'{{'+'GENDER_SEPARATOR'+'}}' }</code>
+      </p>
+
+      {Object.keys(filters).length > 0 && (
+        <div className="space-y-1.5">
+          {Object.entries(filters).map(([lang, pattern]) => (
+            <div key={lang} className="flex items-center gap-2 text-xs">
+              <span className="font-mono w-40 flex-shrink-0 bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded">{lang}</span>
+              <input
+                className="input flex-1 text-xs py-0.5 font-mono"
+                value={pattern}
+                onChange={e => update(lang, e.target.value)}
+                placeholder="regexp pattern"
+              />
+              <button onClick={() => remove(lang)} className="text-red-400 hover:text-red-600 flex-shrink-0">
+                <Trash2 size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-2 items-center border-t border-gray-100 pt-2">
+        <input
+          className="input w-40 text-xs py-0.5 font-mono flex-shrink-0"
+          placeholder="language code"
+          value={newLang}
+          onChange={e => setNewLang(e.target.value)}
+        />
+        <input
+          className="input flex-1 text-xs py-0.5 font-mono"
+          placeholder="regexp, e.g. \{\{GENDER_SEPARATOR\}\}"
+          value={newPattern}
+          onChange={e => setNewPattern(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && add()}
+        />
+        <button className="btn-secondary text-xs py-0.5 px-2 flex-shrink-0" onClick={add} disabled={!newLang.trim() || !newPattern.trim()}>
+          <Plus size={11} /> Add
+        </button>
+      </div>
+      {Object.keys(filters).length === 0 && (
+        <p className="text-xs text-gray-400">No variant filters configured.</p>
+      )}
+    </div>
+  )
+}
+
+function ExcludeFilesPanel({
+  appConfig,
+  onSave,
+}: {
+  appConfig: AppConfig | undefined
+  onSave: (patch: Record<string, unknown>) => void
+}) {
+  const { data: mdsGroups = {} } = useQuery({ queryKey: ['mds-groups'], queryFn: fetchMdsGroups })
+  const { data: jsonCategories = [] } = useQuery({ queryKey: ['json-categories'], queryFn: fetchJsonCategories })
+
+  const excludedMds = appConfig?.excluded_mds_groups ?? []
+  const excludedJson = appConfig?.excluded_json_categories ?? []
+
+  const toggleMds = (g: string) => {
+    const next = excludedMds.includes(g) ? excludedMds.filter(x => x !== g) : [...excludedMds, g]
+    onSave({ excluded_mds_groups: next })
+  }
+  const toggleJson = (c: string) => {
+    const next = excludedJson.includes(c) ? excludedJson.filter(x => x !== c) : [...excludedJson, c]
+    onSave({ excluded_json_categories: next })
+  }
+
+  if (!appConfig) return <p className="text-xs text-gray-400">Loading…</p>
+
+  return (
+    <div className="space-y-3">
+      {Object.keys(mdsGroups).length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-gray-700 mb-1.5">Metadataset groups</p>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.keys(mdsGroups).map(g => (
+              <label key={g} className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded border cursor-pointer select-none transition-colors ${
+                excludedMds.includes(g)
+                  ? 'bg-red-50 border-red-200 text-red-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={excludedMds.includes(g)}
+                  onChange={() => toggleMds(g)}
+                  className="w-3 h-3 accent-red-500"
+                />
+                {g}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      {(jsonCategories as string[]).length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-gray-700 mb-1.5">JSON categories</p>
+          <div className="flex flex-wrap gap-1.5">
+            {(jsonCategories as string[]).map(c => (
+              <label key={c} className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded border cursor-pointer select-none transition-colors ${
+                excludedJson.includes(c)
+                  ? 'bg-red-50 border-red-200 text-red-700'
+                  : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={excludedJson.includes(c)}
+                  onChange={() => toggleJson(c)}
+                  className="w-3 h-3 accent-red-500"
+                />
+                {c}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+      <p className="text-xs text-gray-400">
+        Checked = excluded · changes save immediately
+      </p>
     </div>
   )
 }
@@ -317,6 +476,21 @@ export default function SettingsView({ settings, onChange }: Props) {
               <Plus size={12} /> Add Custom Area
             </button>
           )}
+        </section>
+
+        {/* Variant Filters */}
+        <section className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+          <h3 className="font-semibold text-gray-800 mb-1">Variant Language Filters</h3>
+          <VariantFiltersPanel appConfig={appConfig} onSave={saveConfigMutation.mutate} />
+        </section>
+
+        {/* Exclude Files */}
+        <section className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+          <h3 className="font-semibold text-gray-800 mb-1">Excluded Files</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            Checked items are hidden from the editor. Useful for legacy files like <code className="bg-gray-100 px-1 rounded">mds_translation</code>.
+          </p>
+          <ExcludeFilesPanel appConfig={appConfig} onSave={saveConfigMutation.mutate} />
         </section>
 
         {/* Language Descriptions */}

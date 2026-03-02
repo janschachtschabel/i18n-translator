@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Plus, Download, RefreshCw, Eye, EyeOff, ChevronDown, ChevronUp, Wand2, Filter, AlertTriangle } from 'lucide-react'
+import { Search, Plus, Download, RefreshCw, Eye, EyeOff, ChevronDown, ChevronUp, Wand2, Filter, AlertTriangle, Trash2, ArrowUpDown, Equal } from 'lucide-react'
 import { Tooltip } from './Tooltip'
-import { fetchMail, saveMailLang, addMailLanguage, downloadArea, aiTranslate } from '../api'
+import { fetchMail, saveMailLang, addMailLanguage, downloadArea, aiTranslate, fetchAppConfig, deleteMailTemplate, insertMailTemplate } from '../api'
 import type { AppSettings } from '../types'
 
 interface Props {
@@ -12,6 +12,18 @@ interface Props {
 
 function isMissing(v: string | undefined) {
   return !v || !v.trim()
+}
+
+function isEffectivelyMissing(
+  val: string | undefined,
+  lang: string,
+  refVal: string,
+  variantFilters: Record<string, string>
+): boolean {
+  if (!isMissing(val)) return false
+  const pattern = variantFilters[lang]
+  if (!pattern) return true
+  try { return new RegExp(pattern).test(refVal) } catch { return true }
 }
 
 function getTemplateVars(s: string): string[] {
@@ -33,8 +45,13 @@ export default function MailView({ settings, onStatsChange }: Props) {
   const [aiError, setAiError] = useState('')
   const [fillingLang, setFillingLang] = useState<string | null>(null)
   const [fillProgress, setFillProgress] = useState<{ done: number; total: number } | null>(null)
+  const [showNewTemplate, setShowNewTemplate] = useState(false)
+  const [newTemplateName, setNewTemplateName] = useState('')
+  const [newTemplateHasSubject, setNewTemplateHasSubject] = useState(false)
+  const [sortAlpha, setSortAlpha] = useState(false)
 
   const { data, isLoading } = useQuery({ queryKey: ['mail'], queryFn: fetchMail })
+  const { data: appConfig } = useQuery({ queryKey: ['app-config'], queryFn: fetchAppConfig })
 
   const saveMutation = useMutation({
     mutationFn: ({ lang, templates }: { lang: string; templates: Record<string, { subject?: string; message?: string }> }) =>
@@ -43,6 +60,26 @@ export default function MailView({ settings, onStatsChange }: Props) {
       qc.invalidateQueries({ queryKey: ['mail'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
       onStatsChange()
+    },
+  })
+
+  const deleteTemplateMutation = useMutation({
+    mutationFn: (name: string) => deleteMailTemplate(name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mail'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      onStatsChange()
+    },
+  })
+
+  const insertTemplateMutation = useMutation({
+    mutationFn: ({ name, hasSubject }: { name: string; hasSubject: boolean }) =>
+      insertMailTemplate(name, hasSubject),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mail'] })
+      setShowNewTemplate(false)
+      setNewTemplateName('')
+      setNewTemplateHasSubject(false)
     },
   })
 
@@ -62,6 +99,7 @@ export default function MailView({ settings, onStatsChange }: Props) {
     return <div className="flex items-center justify-center h-full text-gray-400"><RefreshCw size={16} className="animate-spin mr-2" /> Loading…</div>
   }
 
+  const variantFilters = appConfig?.variant_filters ?? {}
   const visibleLangs = data.languages.filter(l => !hiddenLangs.includes(l))
   const referenceLang = settings.referenceLang
   const bestRefLang = data.languages.includes(settings.referenceLang)
@@ -90,16 +128,41 @@ export default function MailView({ settings, onStatsChange }: Props) {
       })
   }
 
-  const filtered = data.entries.filter(e => {
-    if (filter && !e.name.toLowerCase().includes(filter.toLowerCase())) return false
-    if (showMissingOnly) {
-      if (!visibleLangs.some(lang => isMissing(getDraft(e.name, lang, 'message')))) return false
-    }
-    if (showErrorsOnly) {
-      if (!entryHasVarError(e.name)) return false
-    }
-    return true
-  })
+  const getEntryVarErrorDetails = (name: string): string => {
+    const refMsg = data.entries.find(e => e.name === name)?.translations[bestRefLang]?.message ?? ''
+    const refVars = getTemplateVars(refMsg)
+    if (refVars.length === 0) return ''
+    return visibleLangs
+      .filter(l => l !== bestRefLang && !isMissing(getDraft(name, l, 'message')))
+      .flatMap(l => {
+        const tv = getTemplateVars(getDraft(name, l, 'message'))
+        const missing = refVars.filter(v => !tv.includes(v))
+        const extra = tv.filter(v => !refVars.includes(v))
+        if (!missing.length && !extra.length) return []
+        const parts = [
+          missing.length ? `missing: ${missing.join(', ')}` : '',
+          extra.length ? `extra: ${extra.join(', ')}` : '',
+        ].filter(Boolean).join('; ')
+        return [`${l}: ${parts}`]
+      })
+      .join('\n')
+  }
+
+  const filtered = (() => {
+    let entries = data.entries.filter(e => {
+      if (filter && !e.name.toLowerCase().includes(filter.toLowerCase())) return false
+      if (showMissingOnly) {
+        const refMsg = data.entries.find(x => x.name === e.name)?.translations[bestRefLang]?.message ?? ''
+        if (!visibleLangs.some(lang => isEffectivelyMissing(getDraft(e.name, lang, 'message'), lang, refMsg, variantFilters))) return false
+      }
+      if (showErrorsOnly) {
+        if (!entryHasVarError(e.name)) return false
+      }
+      return true
+    })
+    if (sortAlpha) entries = [...entries].sort((a, b) => a.name.localeCompare(b.name))
+    return entries
+  })()
 
   const handleSave = (lang: string) => {
     const langData: Record<string, { subject?: string; message?: string }> = {}
@@ -153,11 +216,11 @@ export default function MailView({ settings, onStatsChange }: Props) {
     const missingTasks: Array<{ entry: typeof data.entries[0]; field: 'subject' | 'message'; src: { lang: string; value: string } }> = []
     for (const entry of data.entries) {
       const hasSubject = Object.values(entry.translations).some(t => 'subject' in t)
-      if (hasSubject && isMissing(getDraft(entry.name, lang, 'subject'))) {
+      if (hasSubject && isEffectivelyMissing(getDraft(entry.name, lang, 'subject'), lang, entry.translations[bestRefLang]?.subject ?? '', variantFilters)) {
         const src = findRefSource(entry, 'subject', lang)
         if (src) missingTasks.push({ entry, field: 'subject', src })
       }
-      if (isMissing(getDraft(entry.name, lang, 'message'))) {
+      if (isEffectivelyMissing(getDraft(entry.name, lang, 'message'), lang, entry.translations[bestRefLang]?.message ?? '', variantFilters)) {
         const src = findRefSource(entry, 'message', lang)
         if (src) missingTasks.push({ entry, field: 'message', src })
       }
@@ -229,6 +292,22 @@ export default function MailView({ settings, onStatsChange }: Props) {
           </button>
         </Tooltip>
 
+        <Tooltip text={sortAlpha ? 'Sorted alphabetically — click for file order' : 'Sorted by file order — click for alphabetical'} side="bottom">
+          <button
+            onClick={() => setSortAlpha(x => !x)}
+            className={`btn text-xs py-1 ${sortAlpha ? 'btn-primary' : 'btn-ghost'}`}
+          >
+            <ArrowUpDown size={12} />
+            {sortAlpha ? 'A–Z' : 'File order'}
+          </button>
+        </Tooltip>
+
+        <Tooltip text="Add a new mail template" side="bottom">
+          <button onClick={() => setShowNewTemplate(x => !x)} className="btn-secondary text-xs py-1">
+            <Plus size={12} /> Template
+          </button>
+        </Tooltip>
+
         <Tooltip text="Add a new language or language variant (e.g. fr_FR)" side="bottom">
           <button onClick={() => setShowAddLang(x => !x)} className="btn-secondary text-xs py-1">
             <Plus size={12} /> Language
@@ -238,6 +317,32 @@ export default function MailView({ settings, onStatsChange }: Props) {
           <button onClick={() => downloadArea('mail')} className="btn-ghost text-xs py-1"><Download size={12} /></button>
         </Tooltip>
       </div>
+
+      {showNewTemplate && (
+        <div className="flex-shrink-0 bg-purple-50 border-b border-purple-200 px-4 py-2 flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-medium text-purple-800">New template name:</span>
+          <input
+            autoFocus
+            className="input w-56 text-xs font-mono py-1"
+            placeholder="e.g. password_reset"
+            value={newTemplateName}
+            onChange={e => setNewTemplateName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && newTemplateName.trim()) insertTemplateMutation.mutate({ name: newTemplateName.trim(), hasSubject: newTemplateHasSubject }) }}
+          />
+          <label className="flex items-center gap-1.5 text-xs text-purple-700 cursor-pointer">
+            <input type="checkbox" checked={newTemplateHasSubject} onChange={e => setNewTemplateHasSubject(e.target.checked)} />
+            Include subject field
+          </label>
+          <button
+            className="btn-primary text-xs py-1"
+            disabled={!newTemplateName.trim() || insertTemplateMutation.isPending}
+            onClick={() => insertTemplateMutation.mutate({ name: newTemplateName.trim(), hasSubject: newTemplateHasSubject })}
+          >
+            {insertTemplateMutation.isPending ? <RefreshCw size={12} className="animate-spin" /> : <Plus size={12} />} Create
+          </button>
+          <button className="btn-ghost text-xs py-1" onClick={() => { setShowNewTemplate(false); setNewTemplateName('') }}>Cancel</button>
+        </div>
+      )}
 
       {showAddLang && (
         <div className="flex-shrink-0 bg-purple-50 border-b border-purple-200 px-4 py-2 space-y-1.5">
@@ -267,9 +372,10 @@ export default function MailView({ settings, onStatsChange }: Props) {
       <div className="flex-shrink-0 bg-gray-50 border-b border-gray-200 px-4 py-1.5 flex items-center gap-2 flex-wrap">
         <span className="text-xs text-gray-500 flex-shrink-0">Per language:</span>
         {visibleLangs.filter(l => l !== bestRefLang).map(lang => {
-          const missingCount = data.entries.reduce((n, e) =>
-            n + (isMissing(getDraft(e.name, lang, 'message')) ? 1 : 0), 0
-          )
+          const missingCount = data.entries.reduce((n, e) => {
+            const refMsg = data.entries.find(x => x.name === e.name)?.translations[bestRefLang]?.message ?? ''
+            return n + (isEffectivelyMissing(getDraft(e.name, lang, 'message'), lang, refMsg, variantFilters) ? 1 : 0)
+          }, 0)
           const isRunning = fillingLang === lang
           return (
             <span key={lang} className="inline-flex items-center gap-1">
@@ -322,7 +428,7 @@ export default function MailView({ settings, onStatsChange }: Props) {
         {filtered.map(entry => {
           const isExpanded = expanded[entry.name] !== false
           const hasAnyMissing = visibleLangs.some(lang =>
-            isMissing(getDraft(entry.name, lang, 'message'))
+            isEffectivelyMissing(getDraft(entry.name, lang, 'message'), lang, entry.translations[bestRefLang]?.message ?? '', variantFilters)
           )
           const hasVarErr = entryHasVarError(entry.name)
           const borderClass = hasVarErr ? 'border-yellow-400' : hasAnyMissing ? 'border-red-300' : 'border-gray-200'
@@ -335,11 +441,24 @@ export default function MailView({ settings, onStatsChange }: Props) {
                 <span className="font-mono text-xs font-semibold text-gray-800">{entry.name}</span>
                 {hasAnyMissing && <span className="badge-missing">missing</span>}
                 {hasVarErr && (
-                  <span className="inline-flex items-center gap-1 text-xs bg-yellow-100 text-yellow-800 border border-yellow-300 px-1.5 py-0.5 rounded-full font-medium">
-                    <AlertTriangle size={10} /> var error
-                  </span>
+                  <Tooltip text={getEntryVarErrorDetails(entry.name)} side="bottom">
+                    <span className="inline-flex items-center gap-1 text-xs bg-yellow-100 text-yellow-800 border border-yellow-300 px-1.5 py-0.5 rounded-full font-medium cursor-help">
+                      <AlertTriangle size={10} /> var error
+                    </span>
+                  </Tooltip>
                 )}
                 <span className="flex-1" />
+                <Tooltip text={`Delete template "${entry.name}" from all languages`} side="left">
+                  <span
+                    className="p-1 rounded hover:bg-red-100 text-red-300 hover:text-red-500 transition-colors"
+                    onClick={e => {
+                      e.stopPropagation()
+                      if (window.confirm(`Delete template "${entry.name}" from all languages?`)) deleteTemplateMutation.mutate(entry.name)
+                    }}
+                  >
+                    <Trash2 size={12} />
+                  </span>
+                </Tooltip>
                 {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
               </button>
 
@@ -348,12 +467,16 @@ export default function MailView({ settings, onStatsChange }: Props) {
                   {visibleLangs.map(lang => {
                     const hasSubject = 'subject' in (entry.translations[lang] ?? {}) ||
                       Object.values(entry.translations).some((t: Record<string, string>) => 'subject' in t)
-                    const msgMissing = isMissing(getDraft(entry.name, lang, 'message'))
+                    const refMsgVal = entry.translations[bestRefLang]?.message ?? ''
+                    const refSubjVal = entry.translations[bestRefLang]?.subject ?? ''
+                    const msgMissing = isEffectivelyMissing(getDraft(entry.name, lang, 'message'), lang, refMsgVal, variantFilters)
                     const subjVal = getDraft(entry.name, lang, 'subject')
                     const msgVal = getDraft(entry.name, lang, 'message')
+                    const msgSameAsRef = lang !== bestRefLang && !msgMissing && msgVal.trim() !== '' && msgVal === refMsgVal
+                    const subjSameAsRef = lang !== bestRefLang && !isMissing(subjVal) && subjVal.trim() !== '' && subjVal === refSubjVal
                     const sugKey = `${entry.name}:${lang}`
                     return (
-                      <div key={lang} className={`p-3 border-r border-gray-100 last:border-r-0 ${msgMissing ? 'bg-red-50/40' : ''}`}>
+                      <div key={lang} className={`p-3 border-r border-gray-100 last:border-r-0 ${msgMissing ? 'bg-red-50/40' : msgSameAsRef ? 'bg-orange-50/20' : ''}`}>
                         <div className="flex items-center justify-between mb-1.5">
                           <span className={`text-xs font-semibold ${lang === referenceLang ? 'text-blue-700' : 'text-gray-700'}`}>
                             {lang} {lang === referenceLang && <span className="badge-ok ml-1">ref</span>}
@@ -382,7 +505,14 @@ export default function MailView({ settings, onStatsChange }: Props) {
 
                         {hasSubject && (
                           <div className="mb-2">
-                            <label className="text-xs text-gray-500 mb-0.5 block">Subject</label>
+                            <label className="text-xs text-gray-500 mb-0.5 flex items-center gap-1">
+                              Subject
+                              {subjSameAsRef && (
+                                <Tooltip text={`Identical to ${bestRefLang} — possibly not translated`} side="right">
+                                  <span className="inline-flex items-center gap-0.5 text-orange-400 cursor-help"><Equal size={10} /></span>
+                                </Tooltip>
+                              )}
+                            </label>
                             <div className="flex gap-1">
                               <input
                                 className={`input text-xs py-1 flex-1 ${isMissing(subjVal) ? 'cell-missing' : ''}`}
@@ -403,7 +533,14 @@ export default function MailView({ settings, onStatsChange }: Props) {
                         )}
 
                         <div>
-                          <label className="text-xs text-gray-500 mb-0.5 block">Message (HTML)</label>
+                          <label className="text-xs text-gray-500 mb-0.5 flex items-center gap-1">
+                            Message (HTML)
+                            {msgSameAsRef && (
+                              <Tooltip text={`Identical to ${bestRefLang} — possibly not translated`} side="right">
+                                <span className="inline-flex items-center gap-0.5 text-orange-400 cursor-help"><Equal size={10} /></span>
+                              </Tooltip>
+                            )}
+                          </label>
                           <div className="relative">
                             <textarea
                               className={`input text-xs py-1 font-mono min-h-[6rem] resize-y ${msgMissing ? 'cell-missing' : ''}`}

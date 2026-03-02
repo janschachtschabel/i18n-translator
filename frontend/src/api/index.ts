@@ -23,6 +23,12 @@ export const addJsonLanguage = (lang: string, baseOn?: string, description?: str
 export const fetchJsonQuality = (category: string): Promise<{ issues: QualityIssue[] }> =>
   api.get(`/json/${category}/quality`).then(r => r.data)
 
+export const deleteJsonKey = (category: string, key: string) =>
+  api.delete('/json/key', { data: { category, key } }).then(r => r.data)
+
+export const insertJsonKey = (category: string, key: string, afterKey?: string) =>
+  api.post('/json/key', { category, key, after_key: afterKey ?? null }).then(r => r.data)
+
 // ── Mail ──────────────────────────────────────────────────────────────────────
 export const fetchMail = (): Promise<MailData> =>
   api.get('/mail').then(r => r.data)
@@ -32,6 +38,12 @@ export const saveMailLang = (lang: string, templates: Record<string, { subject?:
 
 export const addMailLanguage = (lang: string, description?: string) =>
   api.post('/mail/add-language', { area: 'mail', lang, description }).then(r => r.data)
+
+export const deleteMailTemplate = (name: string) =>
+  api.delete('/mail/template', { data: { name } }).then(r => r.data)
+
+export const insertMailTemplate = (name: string, hasSubject = false) =>
+  api.post('/mail/template', { name, has_subject: hasSubject }).then(r => r.data)
 
 // ── MDS ───────────────────────────────────────────────────────────────────────
 export const fetchMdsGroups = (): Promise<Record<string, string[]>> =>
@@ -48,6 +60,12 @@ export const addMdsLanguage = (lang: string, description?: string) =>
 
 export const fetchMdsQuality = (group: string): Promise<{ issues: QualityIssue[] }> =>
   api.get(`/mds/${group}/quality`).then(r => r.data)
+
+export const deleteMdsKey = (group: string, key: string) =>
+  api.delete('/mds/key', { data: { group, key } }).then(r => r.data)
+
+export const insertMdsKey = (group: string, key: string, afterKey?: string) =>
+  api.post('/mds/key', { group, key, after_key: afterKey ?? null }).then(r => r.data)
 
 // ── AI ────────────────────────────────────────────────────────────────────────
 export const aiTranslate = (text: string, sourceLang: string, targetLang: string, context?: string) =>
